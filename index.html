@@ -1167,7 +1167,7 @@
     function loadStreams() {
       if (streamsLoaded || streamsLoading) return Promise.resolve();
       streamsLoading = true;
-      return fetch('data/maya_streams.geojson')
+      return fetch('data/maya_streams.geojson', { cache: 'no-store' })
         .then((r) => { if (!r.ok) throw new Error('streams ' + r.status); return r.json(); })
         .then((geo) => {
           streamLayer = L.geoJSON(geo, {
@@ -1223,7 +1223,7 @@
     function loadStructures() {
       if (structuresLoaded || structuresLoading) return Promise.resolve();
       structuresLoading = true;
-      return fetch('data/maya_structures.geojson')
+      return fetch('data/maya_structures.geojson', { cache: 'no-store' })
         .then((r) => { if (!r.ok) throw new Error('structures ' + r.status); return r.json(); })
         .then((geo) => {
           structureLayer = L.geoJSON(geo, {
@@ -2520,7 +2520,7 @@
     bubblesCluster.on('animationend', refreshLabels);
 
     // ── Load GeoJSON and build markers ────────────────────────────────────
-    fetch('data/maya_sites.geojson')
+    fetch('data/maya_sites.geojson', { cache: 'no-store' })
       .then(response => {
         if (!response.ok) throw new Error(`Failed to load GeoJSON: ${response.status}`);
         return response.json();
