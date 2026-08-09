@@ -920,7 +920,7 @@
 
       <!-- Section 6 -->
       <section class="ap-section">
-        <p class="ap-note">Data source: Electronic Atlas of Ancient Maya Sites (EAAMS), compiled by Walter Witschey and Clifford Brown. Coordinates in WGS84 (EPSG:4326). Site significance ranked 1 (major centre) to 5 (minimal remains) by the original dataset compilers.</p>
+        <p class="ap-note">Data source: Electronic Atlas of Ancient Maya Sites (EAAMS), compiled by Walter Witschey and Clifford Brown. Coordinates in WGS84 (EPSG:4326). Site significance ranked 1 (major centre) to 5 (minimal remains) by the original dataset compilers. Stream network from OpenStreetMap contributors and supplied survey data. Structure footprints for the Blue Creek area from supplied archaeological survey data.</p>
       </section>
     </div>
   </aside>
@@ -974,10 +974,11 @@
         <line x1="12" y1="20" x2="12" y2="23"></line>
         <line x1="1" y1="12" x2="4" y2="12"></line>
         <line x1="20" y1="12" x2="23" y2="12"></line>
+        <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"></circle>
       </svg>
     </button>
     <div class="layers-wrap">
-      <button class="map-icon-btn" id="layersBtn" type="button" title="Change basemap and layers" aria-label="Change basemap and layers">
+      <button class="map-icon-btn" id="layersBtn" type="button" title="Basemaps" aria-label="Choose basemap">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
           <polyline points="2 17 12 22 22 17"></polyline>
@@ -995,21 +996,21 @@
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 
   <script>
-    // Feature 26: a curated set of notable sites, used by the "sites with maps" filter.
-    const SITES_WITH_DATA = new Set(['Bed Rock', 'Blue Creek', 'Chum Balam-Nal', 'Grey Fox', 'Nojol Nah']);
+    // Feature 26: the set of sites for which detailed structure data exists,
+    // matched by location to the supplied Blue Creek survey data.
+    const SITES_WITH_DATA = new Set(["Bed Rock", "Blue Creek", "Chum Balam-Nal", "Grey Fox", "Nojol Nah"]);
     const MAP_BADGE_SVG = '<svg class="map-badge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>';
 
-    // ── Read state from the URL hash, if present ────────────────────────────
+    // ── Feature 21: shareable view state in the URL ───────────────────────
     function parseHashState() {
+      const raw = window.location.hash.replace(/^#\/?/, '');
+      const params = new URLSearchParams(raw);
       const state = {};
-      if (!window.location.hash || window.location.hash.length < 2) return state;
-      const params = new URLSearchParams(window.location.hash.slice(1));
 
       const lat = parseFloat(params.get('lat'));
       const lng = parseFloat(params.get('lng'));
-      if (Number.isFinite(lat) && Number.isFinite(lng)) state.center = [lat, lng];
-
       const z = parseInt(params.get('z'), 10);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) state.center = [lat, lng];
       if (Number.isFinite(z)) state.zoom = z;
 
       const q = params.get('q');
@@ -1027,6 +1028,14 @@
 
       const base = params.get('base');
       if (base) state.base = base;
+
+      const streams = params.get('streams');
+      if (streams === '0') state.streams = false;
+      else if (streams === '1') state.streams = true;
+
+      const structures = params.get('struct');
+      if (structures === '0') state.structures = false;
+      else if (structures === '1') state.structures = true;
 
       const withData = params.get('data');
       if (withData === '1') state.withData = true;
@@ -1078,6 +1087,12 @@
     });
     map.addControl(new HomeControl());
 
+    map.createPane('riversPane');
+    map.getPane('riversPane').style.zIndex = 350;
+
+    map.createPane('structuresPane');
+    map.getPane('structuresPane').style.zIndex = 360;
+
     map.createPane('labelsPane');
     map.getPane('labelsPane').style.zIndex = 640;
     map.getPane('labelsPane').classList.add('leaflet-labels-pane');
@@ -1127,6 +1142,118 @@
     const basemapPopover = document.getElementById("basemapPopover");
     const layersBtn = document.getElementById("layersBtn");
 
+    let streamsOn = (initialState.streams === undefined) ? true : initialState.streams;
+    let streamLayer = null;
+    let streamsLoaded = false;
+    let streamsLoading = false;
+
+    const STREAM_MIN_ZOOM = 9;
+
+    function streamStyle(feature) {
+      const w = (feature.properties && feature.properties.w) || 1;
+      return { color: '#4a90d9', weight: w === 2 ? 1.4 : 1.0, opacity: 0.8 };
+    }
+
+    function updateStreamVisibility() {
+      if (!streamsLoaded || !streamsOn) return;
+      const show = map.getZoom() >= STREAM_MIN_ZOOM;
+      if (show) {
+        if (!map.hasLayer(streamLayer)) streamLayer.addTo(map);
+      } else if (map.hasLayer(streamLayer)) {
+        map.removeLayer(streamLayer);
+      }
+    }
+
+    function loadStreams() {
+      if (streamsLoaded || streamsLoading) return Promise.resolve();
+      streamsLoading = true;
+      return fetch('data/maya_streams.geojson')
+        .then((r) => { if (!r.ok) throw new Error('streams ' + r.status); return r.json(); })
+        .then((geo) => {
+          streamLayer = L.geoJSON(geo, {
+            pane: 'riversPane',
+            style: streamStyle,
+            interactive: false
+          });
+          streamsLoaded = true;
+          streamsLoading = false;
+          updateStreamVisibility();
+        })
+        .catch((e) => { streamsLoading = false; console.error('Stream layer failed to load:', e); });
+    }
+
+    function setStreams(on) {
+      streamsOn = on;
+      if (on) {
+        if (!streamsLoaded) loadStreams();
+        else updateStreamVisibility();
+      } else if (streamLayer && map.hasLayer(streamLayer)) {
+        map.removeLayer(streamLayer);
+      }
+      renderBasemapOptions();
+      scheduleHashUpdate();
+    }
+
+    // ── Feature 25: structure footprints ──────────────────────────────────
+    let structuresOn = (initialState.structures === undefined) ? true : initialState.structures;
+    let structureLayer = null;
+    let structuresLoaded = false;
+    let structuresLoading = false;
+
+    const STRUCT_MIN_ZOOM = 14;
+
+    function structureStyle(feature) {
+      const t = feature.properties && feature.properties.t;
+      if (t === 'line') {
+        return { color: '#8a4b12', weight: 1.1, opacity: 0.9, fill: false };
+      }
+      return { color: '#7c4a17', weight: 1, opacity: 0.95, fillColor: '#b5651d', fillOpacity: 0.35 };
+    }
+
+    function updateStructureVisibility() {
+      if (!structuresLoaded || !structuresOn) return;
+      const show = map.getZoom() >= STRUCT_MIN_ZOOM;
+      if (show) {
+        if (!map.hasLayer(structureLayer)) structureLayer.addTo(map);
+      } else if (map.hasLayer(structureLayer)) {
+        map.removeLayer(structureLayer);
+      }
+    }
+
+    function loadStructures() {
+      if (structuresLoaded || structuresLoading) return Promise.resolve();
+      structuresLoading = true;
+      return fetch('data/maya_structures.geojson')
+        .then((r) => { if (!r.ok) throw new Error('structures ' + r.status); return r.json(); })
+        .then((geo) => {
+          structureLayer = L.geoJSON(geo, {
+            pane: 'structuresPane',
+            style: structureStyle,
+            interactive: true,
+            onEachFeature: (f, layer) => {
+              const site = f.properties && f.properties.site;
+              if (site) layer.bindPopup(`<div class="popup-title" style="margin:0">${site}</div><div class="popup-sub" style="margin-top:4px">Structure footprint</div>`, { maxWidth: 220 });
+            }
+          });
+          structuresLoaded = true;
+          structuresLoading = false;
+          updateStructureVisibility();
+        })
+        .catch((e) => { structuresLoading = false; console.error('Structure layer failed to load:', e); });
+    }
+
+    function setStructures(on) {
+      structuresOn = on;
+      if (on) {
+        if (!structuresLoaded) loadStructures();
+        else updateStructureVisibility();
+      } else if (structureLayer && map.hasLayer(structureLayer)) {
+        map.removeLayer(structureLayer);
+      }
+      renderBasemapOptions();
+      scheduleHashUpdate();
+    }
+
     function renderBasemapOptions() {
       basemapPopover.innerHTML = '';
       basemapMeta.forEach(({ name, sub }) => {
@@ -1147,6 +1274,24 @@
         });
         basemapPopover.appendChild(opt);
       });
+
+      const divider = document.createElement('div');
+      divider.className = 'bm-divider';
+      basemapPopover.appendChild(divider);
+
+      const streamsOpt = document.createElement('button');
+      streamsOpt.type = 'button';
+      streamsOpt.className = 'bm-option' + (streamsOn ? ' active' : '');
+      streamsOpt.innerHTML = `<span class="bm-check">${CHECK_SVG}</span><span class="bm-text"><span class="bm-name">Streams</span><span class="bm-sub">Small watercourses, from mid zoom</span></span>`;
+      streamsOpt.addEventListener('click', () => setStreams(!streamsOn));
+      basemapPopover.appendChild(streamsOpt);
+
+      const structOpt = document.createElement('button');
+      structOpt.type = 'button';
+      structOpt.className = 'bm-option' + (structuresOn ? ' active' : '');
+      structOpt.innerHTML = `<span class="bm-check">${CHECK_SVG}</span><span class="bm-text"><span class="bm-name">Structures</span><span class="bm-sub">Building outlines, Blue Creek (high zoom)</span></span>`;
+      structOpt.addEventListener('click', () => setStructures(!structuresOn));
+      basemapPopover.appendChild(structOpt);
     }
     function openBasemapPopover() { basemapPopover.classList.add("open"); layersBtn.classList.add("active"); }
     function closeBasemapPopover() { basemapPopover.classList.remove("open"); layersBtn.classList.remove("active"); }
@@ -1742,6 +1887,8 @@
       if (activeRanks.size > 0) params.set('ranks', [...activeRanks].sort((a, b) => a - b).join(','));
       if (currentView !== 'points') params.set('view', currentView);
       if (activeBasemapName !== 'OpenStreetMap') params.set('base', activeBasemapName);
+      if (!streamsOn) params.set('streams', '0');
+      if (!structuresOn) params.set('struct', '0');
       if (withDataOnly) params.set('data', '1');
       if (radiusFilter) {
         params.set('rc', radiusFilter.lat.toFixed(4) + ',' + radiusFilter.lng.toFixed(4));
@@ -2347,10 +2494,12 @@
       addMeasurePoint(map.containerPointToLatLng(pt));
     }, true);
 
-    // ── Refresh labels and analytics on view change ──
+    // ── Refresh labels, analytics, streams and structures on view change ──
     let analyticsTimer = null;
     function onViewChanged() {
       refreshLabels();
+      updateStreamVisibility();
+      updateStructureVisibility();
       if (analyticsTimer) clearTimeout(analyticsTimer);
       analyticsTimer = setTimeout(updateAnalytics, 150);
       scheduleHashUpdate();
@@ -2381,6 +2530,9 @@
         });
 
         applyFilters();
+
+        if (streamsOn) loadStreams();
+        if (structuresOn) loadStructures();
 
         if (initialState.radius) {
           rcSlider.value = String(initialState.radius.km);
