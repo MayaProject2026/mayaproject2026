@@ -2,7 +2,7 @@
 
 A modernised reimplementation of [mayamap.org](http://mayamap.org), built using Leaflet.js and GeoJSON with a fully client-side, statically hosted architecture.
 
-**Live demo:** https://mayaproject2026.github.io/maya-modern-map/
+**Live demo:** https://mayaproject2026.github.io
 
 ## About
 
